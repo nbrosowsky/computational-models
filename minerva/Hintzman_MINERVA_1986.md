@@ -10,80 +10,7 @@ output:
 HINTZMAN 1986 Replications
 ---------------------
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
 
-set.seed(2133)
-library(ggplot2)
-library(dplyr)
-library(lsa)
-
-get_echo<-function(probe = NULL, memory = NULL, normalize = TRUE, similarity = "hintzman") {
-  # calculate similarity
-  if (similarity == "cosine"){
-       # alt. cosine similarity
-       s <- apply(memory,1,function(x) lsa::cosine(probe,x))     
-  } else {
-       # Eq. 1, Hintzman (1984)
-       s <- apply(memory,1,function(x) crossprod(probe, x) / sum(abs(probe)+abs(x) > 0))         
-  }
-  
-  # Eq. 2, Hintzman (1984)    
-  activation <- s^3   
-  
-  # Eq. 3, Hintzman (1984)
-  echo_intensity <- sum(activation)
-  
-  # Eq. 4, Hintzman (1984)
-  echo_content <- activation * memory
-  echo_content[echo_content==Inf] <- 0
-  echo_content <- colSums(echo_content)
-  
-  # normalize
-  if(normalize) echo_content <- echo_content / max(abs(echo_content))
-
-  list(content = echo_content, intensity = echo_intensity)                                  
-}
-
-
-
-encode <- function(memory = NULL, learning_rate = NULL, subset = NULL){
- if (is.null(subset)) subset <- nrow(memory)
-    
-    
-  f <- matrix(
-      sample(c(0,1), size = ncol(memory)*subset, prob = c(1-learning_rate, learning_rate), replace = TRUE),
-      nrow = subset, ncol = ncol(memory)
-      )
-  
-  
-  if (!is.null(subset)) f <- rbind(f, matrix(1, nrow = nrow(memory)-nrow(f), ncol = ncol(memory)))
-  
-  memory <- memory*f
- 
-      
-  return(memory)
-}
-
-
-forget <- function(memory = NULL, forgetting_rate = NULL, subset = NULL){
- if (is.null(subset)) subset <- nrow(memory)
-    
-    
-  f <- matrix(
-      sample(c(0,1), size = ncol(memory)*subset, prob = c(forgetting_rate, 1 - forgetting_rate), replace = TRUE),
-      nrow = subset, ncol = ncol(memory)
-      )
-  
-  
-  if (!is.null(subset)) f <- rbind(f, matrix(1, nrow = nrow(memory)-nrow(f), ncol = ncol(memory)))
-  
-  memory <- memory*f
- 
-      
-  return(memory)
-}
-```
 
 
 
@@ -92,7 +19,8 @@ forget <- function(memory = NULL, forgetting_rate = NULL, subset = NULL){
 
 Each memory trace and each probe was a 23 unit vector. 1-10 represented the category name, and 11-23 represented the stimulus pattern
 
-```{r}
+
+```r
 #set.seed(32468)
 # create prototypes
 # 1:10 = category name
@@ -128,16 +56,23 @@ for (i in 1:3){
     print(cor(echo$content[11:23], prototypes[i,11:23]))
 
 }
+```
 
+```
+## [1] 0.4594182
+## [1] 0.6189433
+## [1] 0.7765922
+```
 
+```r
 ggplot(data=df, aes(y=activations,x=feature))+
   geom_bar(stat="identity",position=position_dodge(),fill="gray")+
   theme_classic(base_size=12) +
   ylab("Activation") + xlab("Features")+
   facet_wrap(exemplars~cue, ncol = 2) 
-
-
 ```
+
+![](Hintzman_MINERVA_1986_files/figure-html/unnamed-chunk-1-1.png)<!-- -->
 
 # 1986 Simulation #2 
 
@@ -145,7 +80,8 @@ Correlations between echo and prototype vary as a function of the number of exem
 
 Run 20 'subjects' / mean correlations for 3, 6, and 9 item
 
-```{r}
+
+```r
 set.seed(32468)
 c1<-c()
 c2<-c()
@@ -185,17 +121,41 @@ c3<-c(c3,cor(prototypes[3,11:23],echo$content[11:23]))
 
 
 mean(c1)
+```
+
+```
+## [1] 0.5850717
+```
+
+```r
 mean(c2)
+```
+
+```
+## [1] 0.7106258
+```
+
+```r
 mean(c3)
+```
 
+```
+## [1] 0.7809507
+```
+
+```r
 print("Hintzman's results: .62, .73, .79")
+```
 
+```
+## [1] "Hintzman's results: .62, .73, .79"
 ```
 
 # Simulation 3: Cuing memory with the prototype to retrieve the category name
 
 
-```{r}
+
+```r
 c1<-c()
 c2<-c()
 c3<-c()
@@ -232,19 +192,42 @@ c3<-c(c3,cor(prototypes[3,1:10],echo$content[1:10]))
 
 
 mean(c1)
+```
+
+```
+## [1] 0.5683128
+```
+
+```r
 mean(c2)
+```
+
+```
+## [1] 0.7360027
+```
+
+```r
 mean(c3)
+```
 
+```
+## [1] 0.9141967
+```
+
+```r
 print("Hintzman's results: .58, .83, .88")
+```
 
-
+```
+## [1] "Hintzman's results: .58, .83, .88"
 ```
 
 # Simulation 4: Deblurring the echo
 
 Retrieved echoes are not exactly like their probe. But resubmitting the retrieved echo as a probe (deblurring / bootstrapping) can clean up the retieval process until it retrieves a perfect copy.
 
-```{r}
+
+```r
 set.seed(1070)
 # create prototypes
 # 1:10 = category name
@@ -282,7 +265,16 @@ for (i in 1:4){
     print(cor(echo$content[1:10], prototypes[3,1:10]))
 
 }
+```
 
+```
+## [1] 0.9374732
+## [1] 0.9755761
+## [1] 0.9887008
+## [1] 0.9935813
+```
+
+```r
 ggplot(data=df, aes(y=activations,x=feature))+
   geom_bar(stat="identity",position=position_dodge(),fill="gray")+
   theme_classic(base_size=12) +
@@ -290,11 +282,14 @@ ggplot(data=df, aes(y=activations,x=feature))+
   facet_wrap(exemplars~cue, ncol = 2) 
 ```
 
+![](Hintzman_MINERVA_1986_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+
 # Simulation #5: classification with forgetting
 
 Hintzman Figure 5
 
-```{r, warning=FALSE}
+
+```r
 classify <- function(memory = NULL, probe = NULL){
     probe[1:10]<-0
     echo<-get_echo(p = probe,m = memory)
@@ -417,3 +412,5 @@ ggplot(summary, aes(x=forgetting_cycle, y=accuracy, group=probe)) +
   ylab("Percentage Correct") + xlab("Forgetting Cycle")+
   facet_wrap(~exemplars)
 ```
+
+![](Hintzman_MINERVA_1986_files/figure-html/unnamed-chunk-5-1.png)<!-- -->

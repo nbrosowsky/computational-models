@@ -1,0 +1,400 @@
+---
+title: "zhang_luck_2008"
+author: "Nicholaus Brosowsky"
+date: "4/8/2019"
+output:
+  html_document:
+    keep_md: yes
+---
+
+
+## Re-analysis of Zhang and Luck, 2008 using Bayesian estimation
+
+```{r setup, include=FALSE}
+# Helper functions
+# Farrell and Lewandowsky, 2018
+library(circular)
+library(ggplot2)
+library(dplyr)
+library(R.matlab)
+
+#pdf for mixture model (Suchow et al., 2013)
+logmixturepdf <- function(data,g,sdv) {
+  data4vm <- mkcirc(data)
+  return(sum(log((1-g)*dvonmises(data4vm,mkcirc(0),sd2k(sdv))  
+                 + g*dunif(data,-180,180))))
+}
+
+#convert SD into Kappa (Suchow et al., 2013)   
+sd2k<-function (d) { #input is in degrees
+  S <- (d/180)*pi  #go to radians
+  R <- exp(-S^2/2)
+  K = 1/(R^3 - 4*R^2 + 3*R)
+  if (R < 0.85) {K <- -0.4 + 1.39*R + 0.43/(1-R)}
+  if (R < 0.53) {K <- 2*R + R^3 + (5*R^5)/6}
+  return(K)
+}
+
+#jeffreys prior for precision (Suchow et al., 2013)
+jp4kappa <- function(K) {
+  z <- exp((log(besselI(K,1,TRUE)) + K) - 
+             (log(besselI(K,0,TRUE)) + K))
+  return(z * (K - z - K*z^2))
+}
+
+#jeffreys prior for a proportion
+jp4prop <- function(p) {p^-0.5 * (1-p)^-0.5}
+
+#get overall prior for model parameters
+logprior<- function(g,sdv) {
+  return(log(jp4kappa(sd2k(sdv)))+log(jp4prop(g)))
+}
+
+#make it circular in degrees
+mkcirc<-function(td)  
+{as.circular(td,control.circular=list(units="degrees"))}
+```
+
+## Bayesian mixture model
+
+```{r}
+fit_mixture_model <- function(data, start_values) {
+  
+  # placeholder for monte-carlo markov chain values
+  chain <- matrix(0,5000,2) 
+  # put starting  values in first
+  chain[1,] <- start_values
+  
+  # number of "burn-in" values 
+  # aka. throw away the first N values
+  burnin <- 500
+
+  # proposed sd values
+  propsd <- start_values*.05
+  
+  # upper and lower bounds
+  # c(prop in memory, degree error)
+  lb <- c(0,4)
+  ub <- c(1,360)
+  
+  # number of iterations
+  N_chain <- dim(chain)[1]
+  
+  for (i in c(2:N_chain)) { 
+    cur <- chain[i-1,]
+    
+    # Run loop until proposed values fall within upper and lower bounds
+    doitagain <- TRUE
+    while (doitagain) {
+      # proposed values + random noise
+      propl <- cur + rnorm(2,0,propsd) 
+      doitagain <- any(propl<lb) || any(propl>ub)
+    }
+    
+    # The use of logarithms guards against numerical issue that arise when very small (or large) numbers are multiplied
+    # one consequence: multiplication turns into addition
+    # likelihood of proposed values
+    lpropval <- logmixturepdf(data, propl[1], propl[2]) + logprior(propl[1], propl[2])
+    
+    # likelihood of current values
+    lcurval  <- logmixturepdf(data,cur[1],cur[2]) + logprior(cur[1],cur[2])
+    
+    # likelihood ratio
+    # Likewise, the ratio of the two values for the target distribution is computed by subtraction rather than division
+    # Because that ratio must be in the range 0-1 to permit comparison against a random uniform number, 
+    # the difference operation on logarithms is exponentiated in the same line in order to return to the original untransformed space. 
+    # (The exponentiated difference between two logs is the same as the ratio between the original numbers).
+    llratio  <- exp(lpropval-lcurval)   
+    
+    # if the value for the proposal is greater than for the current sample, then the ratio of values is necessarily greater than one
+    # thus the random uniform number can never be greater than the ratio and thus the proposal will always be accepted. 
+    # When the ratio is less than 1, 
+    if (runif(1) < llratio) { 
+      chain[i,] <- propl
+    } else {
+      chain[i,] <- cur
+    }
+    
+  } 
+  
+  # get final parameters
+  finparm <- apply(chain[-c(1:burnin),],2,mean) 
+  print(finparm)
+  
+  td <- c(-180:180)
+  
+  pred <- (1-finparm[1]) * dvonmises(mkcirc(td),mkcirc(0),sd2k(finparm[2])) + finparm[1]*dunif(td,-180,180)
+  
+  posterior<-chain[-c(1:burnin),]
+  
+  return(list(preds=pred,posteriors=posterior))
+} 
+
+```
+
+
+## Bayesian mixture model (same as above, except only returns parameter estimates)
+
+```{r}
+fit_mm_params <- function(data, start_values) {
+  
+  # placeholder for monte-carlo markov chain values
+  chain <- matrix(0,5000,2) 
+  # put starting  values in first
+  chain[1,] <- start_values
+  
+  # number of "burn-in" values 
+  # aka. throw away the first N values
+  burnin <- 500
+
+  # proposed sd values
+  propsd <- start_values*.05
+  
+  # upper and lower bounds
+  # c(prop in memory, degree error)
+  lb <- c(0,4)
+  ub <- c(1,360)
+  
+  # number of iterations
+  N_chain <- dim(chain)[1]
+  
+  for (i in c(2:N_chain)) { 
+    cur <- chain[i-1,]
+    
+    # Run loop until proposed values fall within upper and lower bounds
+    doitagain <- TRUE
+    while (doitagain) {
+      # proposed values + random noise
+      propl <- cur + rnorm(2,0,propsd) 
+      doitagain <- any(propl<lb) || any(propl>ub)
+    }
+    
+    # The use of logarithms guards against numerical issue that arise when very small (or large) numbers are multiplied
+    # one consequence: multiplication turns into addition
+    # likelihood of proposed values
+    lpropval <- logmixturepdf(data, propl[1], propl[2]) + logprior(propl[1], propl[2])
+    
+    # likelihood of current values
+    lcurval  <- logmixturepdf(data,cur[1],cur[2]) + logprior(cur[1],cur[2])
+    
+    # likelihood ratio
+    # Likewise, the ratio of the two values for the target distribution is computed by subtraction rather than division
+    # Because that ratio must be in the range 0-1 to permit comparison against a random uniform number, 
+    # the difference operation on logarithms is exponentiated in the same line in order to return to the original untransformed space. 
+    # (The exponentiated difference between two logs is the same as the ratio between the original numbers).
+    llratio  <- exp(lpropval-lcurval)   
+    
+    # if the value for the proposal is greater than for the current sample, then the ratio of values is necessarily greater than one
+    # thus the random uniform number can never be greater than the ratio and thus the proposal will always be accepted. 
+    # When the ratio is less than 1, 
+    if (runif(1) < llratio) { 
+      chain[i,] <- propl
+    } else {
+      chain[i,] <- cur
+    }
+    
+  } 
+  
+  # get final parameters
+  finparm <- apply(chain[-c(1:burnin),],2,mean) 
+  #print(finparm)
+  
+  #td <- c(-180:180)
+  
+  #pred <- (1-finparm[1]) * dvonmises(mkcirc(td),mkcirc(0),sd2k(finparm[2])) + finparm[1]*dunif(td,-180,180)
+  
+  #posterior<-chain[-c(1:burnin),]
+  
+  return(finparm)
+} 
+
+```
+
+## Load data
+
+```{r}
+data <- c()
+for (n in 1:8){
+  temp <- readMat(con = paste0("data/E2_subject_", n, ".mat"))
+  temp <- cbind(unlist(temp$data[[1]][1,]),
+                   unlist(temp$data[[3]][1,]),
+                   rep(n, 500))
+  data <- rbind(data, temp)
+}
+
+data <- data.frame(
+  errors  = data[,1],
+  setsize = data[,2],
+  subject = data[,3]
+)
+
+data$setsize <- as.factor(data$setsize)
+data$subject <- as.factor(data$subject)
+
+raw_data <- data
+
+data <- raw_data %>%
+  group_by(subject, setsize) %>%
+  mutate(errors = errors*(180/pi)) %>%
+  mutate(error_discrete = cut(errors,breaks=seq(from=-180,to=180,by=20),labels=FALSE))
+
+summary <- data %>%
+  group_by(subject, setsize, error_discrete) %>%
+  summarise (n = n()) %>%
+  mutate(errors = n / sum(n)) %>%
+  select(-n)
+
+```
+
+## Fit mixture model for Subject #1
+
+```{r, warning=FALSE, message=FALSE}
+sub_errors <- data %>% 
+  filter(subject == 1,
+         setsize%in%c(3,6))
+sub_summary  <- summary %>%
+  filter(subject == 1,
+         setsize%in%c(3,6))
+
+#get predictions
+start_values     <- c(0.5,20)
+preds<-posteriors<- vector("list",2)
+ssz              <- c(3, 6)
+
+for (s in 1:length(ssz)) {
+  cp<-fit_mixture_model(subset(sub_errors,setsize==ssz[s])$errors,start_values)
+  preds[[s]] <- cp$preds
+  posteriors[[s]] <- cp$posterior
+  preds[[s]] <- preds[[s]]/sum(preds[[s]])  #normalize
+}
+
+sub_summary$setsize<-factor(sub_summary$setsize)
+sub_summary$error_discrete<-factor(sub_summary$error_discrete)
+levels(sub_summary$error_discrete)<-seq(from=-180, to=180, by=20)
+sub_summary$error_discrete<-as.numeric(as.character(sub_summary$error_discrete))
+
+
+# estimated distributions
+set6 <- data.frame(x6 = seq(from=-180,to=180,length.out=length(preds[[2]])),
+                   y6 = preds[[2]]*(length(preds[[2]])/length(sub_summary[sub_summary$setsize == 6,]$error_discrete))
+                   )
+
+set3 <- data.frame(x3 = seq(from=-180,to=180,length.out=length(preds[[1]])),
+                   y3 = preds[[1]]*(length(preds[[1]])/length(sub_summary[sub_summary$setsize == 3,]$error_discrete))
+                   )
+
+
+ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = errors)) + 
+  geom_line(aes(x = x3, y = y3), data = set3, lwd= 1) +
+  geom_line(aes(x = x6, y = y6), data = set6, lwd= 1, linetype = "dashed") +
+  geom_point(data = sub_summary[sub_summary$setsize == 6,], size = 4, pch=21, cex=1.5, col="black",bg="white") +
+  geom_point(data = sub_summary[sub_summary$setsize == 3,], size = 4, pch=21, cex=1.5, col="black",bg="grey") +
+  theme_bw() +
+  labs(title = "Zhang and Luck, 2008; Exp 2; Subject 1", x = "Difference in color value (degrees)", y = "Proportion of responses" ) +
+  scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
+```
+
+
+
+## Fit mixture model for Subject #8
+
+```{r, warning=FALSE, message=FALSE}
+sub_errors <- data %>% 
+  filter(subject == 8,
+         setsize%in%c(3,6))
+sub_summary  <- summary %>%
+  filter(subject == 8,
+         setsize%in%c(3,6))
+
+#get predictions
+start_values     <- c(0.5,20)
+preds<-posteriors<- vector("list",2)
+ssz              <- c(3, 6)
+
+for (s in 1:length(ssz)) {
+  cp<-fit_mixture_model(subset(sub_errors,setsize==ssz[s])$errors,start_values)
+  preds[[s]] <- cp$preds
+  posteriors[[s]] <- cp$posterior
+  preds[[s]] <- preds[[s]]/sum(preds[[s]])  #normalize
+}
+
+sub_summary$setsize<-factor(sub_summary$setsize)
+sub_summary$error_discrete<-factor(sub_summary$error_discrete)
+levels(sub_summary$error_discrete)<-seq(from=-180, to=180, by=20)
+sub_summary$error_discrete<-as.numeric(as.character(sub_summary$error_discrete))
+
+
+# estimated distributions
+set6 <- data.frame(x6 = seq(from=-180,to=180,length.out=length(preds[[2]])),
+                   y6 = preds[[2]]*(length(preds[[2]])/length(sub_summary[sub_summary$setsize == 6,]$error_discrete))
+                   )
+
+set3 <- data.frame(x3 = seq(from=-180,to=180,length.out=length(preds[[1]])),
+                   y3 = preds[[1]]*(length(preds[[1]])/length(sub_summary[sub_summary$setsize == 3,]$error_discrete))
+                   )
+
+
+ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = errors)) + 
+  geom_line(aes(x = x3, y = y3), data = set3, lwd= 1) +
+  geom_line(aes(x = x6, y = y6), data = set6, lwd= 1, linetype = "dashed") +
+  geom_point(data = sub_summary[sub_summary$setsize == 6,], size = 4, pch=21, cex=1.5, col="black",bg="white") +
+  geom_point(data = sub_summary[sub_summary$setsize == 3,], size = 4, pch=21, cex=1.5, col="black",bg="grey") +
+  theme_bw() +
+  labs(title = "Zhang and Luck, 2008; Exp 2; Subject 8", x = "Difference in color value (degrees)", y = "Proportion of responses" ) +
+  scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
+```
+
+## Fit mixture model for all subs
+
+```{r, warning=FALSE, message=FALSE}
+#get predictions
+start_values     <- c(0.5, 20)
+set_sizes        <- c(1, 2, 3, 6)
+
+# placeholder
+mm_data <- c()
+
+
+for (s in set_sizes) {
+  for (n in 1:8) {
+    d <- data %>% filter(subject == n, setsize == s)
+    m <- fit_mm_params(d$errors, start_values)
+    
+    mm_data <- rbind(mm_data, c(n, s, m[1], m[2]))
+  }
+}
+```
+
+
+## Plot Probability and SD
+
+```{r}
+mm_data <- data.frame(
+  subject = mm_data[,1],
+  setsize = mm_data[,2],
+  prob_g  = mm_data[,3],
+  sd      = mm_data[,4]
+)
+
+mm_summary <- mm_data %>%
+  group_by(setsize) %>%
+  summarize(prob_memory = 1-(mean(prob_g)),
+            mean_sd = mean(sd)
+  )
+
+
+ggplot(mm_summary, aes(x = setsize, y = prob_memory)) + 
+  geom_point(size = 3.5)+
+  theme_bw() +
+  scale_y_continuous(limits = c(0,1)) +
+  scale_x_continuous(breaks = c(1,2,3,6)) +
+  labs(x = "Set Size", y = "Probability in Memory", title = "Zhang and Luck, 2008; Exp 2")
+
+
+ggplot(mm_summary, aes(x = setsize, y = mean_sd)) + 
+  geom_point(size = 3.5)+
+  theme_bw() +
+  #scale_y_continuous(limits = c(0,1)) +
+  scale_x_continuous(breaks = c(1,2,3,6)) +
+  labs(x = "Set Size", y = "Standard Deviation", title = "Zhang and Luck, 2008; Exp 2")
+```

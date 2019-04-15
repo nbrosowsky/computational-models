@@ -1,0 +1,51 @@
+---
+title: "Jones_and_Mewhort_2007"
+date: "1/24/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(lsa)
+library(xtable)
+library(knitr)
+```
+
+## Jones & Mewhort Context table
+
+```{r}
+## large file (~750mb)
+load(url('https://www.dropbox.com/s/ft4r9sxyajoo597/BeagleHalfMil.RData?dl=1'))
+
+get_similar_words<-function(in_word,memory,termlist,number){
+  word_index<-which(termlist==in_word)
+  correlations<-cosine(memory[word_index,],t(memory))
+  names(correlations)<-termlist
+  sorted_cors<-sort(correlations,decreasing=T)
+  return(sorted_cors[1:number])
+}
+
+
+```
+
+```{r}
+list_of_words<-c("computer","hospital","heart","cognitive","beer")
+all_words<-list()
+tcnt<-0
+for(i in list_of_words){
+  tcnt<-tcnt+1
+  testtable<-get_similar_words(i,word_mem,word_names,20)
+  df<-data.frame(Word=names(testtable),Cosines=as.numeric(testtable))
+  names(df)[1]<-i
+  names(df)[2]<-paste(c("Sim",tcnt),collapse="")
+  all_words<-c(all_words,df)
+}
+
+
+kable(as.data.frame(all_words))
+
+#t_all<-as.data.frame(all_words)
+```
+
+

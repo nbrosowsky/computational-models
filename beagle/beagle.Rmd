@@ -1,0 +1,574 @@
+---
+title: "BEAGLE"
+date: "1/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Load libraries
+
+library(dplyr)
+library(tidytext)
+```
+
+# Beagle model with Convolution
+
+## Functions
+
+```{r,eval=F,echo=F}
+## Define some functions
+vec_norm <- function(x){
+  return(x/sqrt(sum(x^2)))
+}
+
+forward_convolve <- function(input_matrix){
+  temp_matrix<-input_matrix
+  dim_mat<-dim(temp_matrix)
+  for (i in 1:(dim_mat[1]-1)){
+    temp_matrix[i+1,]<-convolve(temp_matrix[i,],temp_matrix[(i+1),])
+  }
+  return(temp_matrix[(i+1),])
+}
+
+word_sim<-function(w1,w2,TermVec,wrep){
+  w1Ind<-which(TermVec==w1)
+  w2Ind<-which(TermVec==w2)
+  return(cor(wrep[w1Ind,],wrep[w2Ind,]))
+}
+```
+
+
+```{r}
+#Load text to data frame
+wiki<-scan(file="wiki.txt",what=character(),sep="\n")
+
+text_df<-data_frame(line=1:998,text=wiki)
+
+#convert to long format, 1 word per row
+Long_text <- text_df %>% 
+  unnest_tokens(word,text)
+
+# add numbered ids for each unique word
+Long_text$word  <- as.factor(Long_text$word)
+word_ids        <- as.integer(Long_text$word)
+Long_text       <- cbind(Long_text,word_ids)
+
+#levels(Long_text$word)[310]
+
+##make order computations
+Bigrams <- matrix(c(-1, 0,
+                     0, 1),
+                  ncol=2, byrow=T
+                 )
+
+Trigrams <- matrix(c(-2,-1, 0,
+                     -1, 0, 1,
+                      0, 1, 2),
+                   ncol=3,byrow=T
+                   )
+
+Fourgrams <- matrix(c(-3,-2,-1, 0,
+                      -2,-1, 0, 1,
+                      -1, 0, 1, 2,
+                       0, 1, 2, 3),
+                    ncol=4,byrow=T
+                    )
+
+Fivegrams <- matrix(c(-4,-3,-2,-1, 0,
+                      -3,-2,-1, 0, 1,
+                      -2,-1, 0, 1, 2,
+                      -1, 0, 1, 2, 3,
+                       0, 1, 2, 3, 4),
+                    ncol=5,byrow=T
+                    )
+
+Sixgrams <- matrix(c(-5,-4,-3,-2,-1, 0,
+                     -4,-3,-2,-1, 0, 1,
+                     -3,-2,-1, 0, 1, 2,
+                     -2,-1, 0, 1, 2, 3,
+                     -1, 0, 1, 2, 3, 4,
+                      0, 1, 2, 3, 4, 5),
+                   ncol=6,byrow=T
+                   )
+
+Sevengrams <- matrix(c(-6,-5,-4,-3,-2,-1, 0,
+                       -5,-4,-3,-2,-1, 0, 1,
+                       -4,-3,-2,-1, 0, 1, 2,
+                       -3,-2,-1, 0, 1, 2, 3,
+                       -2,-1, 0, 1, 2, 3, 4,
+                       -1, 0, 1, 2, 3, 4, 5,
+                        0, 1, 2, 3, 4, 5, 6),
+                     ncol=7,byrow=T)
+
+Matrix_List<-list(Bigrams,
+                  Trigrams,
+                  Fourgrams,
+                  Fivegrams,
+                  Sixgrams,
+                  Sevengrams)
+
+#vector dimensionality
+vdim<-1000
+# create random vectors for each term
+word_environmental<-matrix(rnorm(1000*3966,0,(1/sqrt(vdim))),ncol=vdim,nrow=3966)
+word_mem<-word_environmental
+
+Rprof (tf <- "log.log", memory.profiling=TRUE)
+
+for(Sntcs in 1:100){
+  sentence_ids<-Long_text[Long_text$line==Sntcs,]$word_ids
+  sentence_matrix<-word_environmental[sentence_ids,]
+  sentence_summed_vector<-colSums(sentence_matrix)
+  
+  for(w in 1:length(sentence_ids)){
+    ##Context
+    w_context<-sentence_summed_vector-sentence_matrix[w,]
+    
+    ## Order
+    nGrams<-c(1,2,3,4,5,6)
+    order_superposition<-c()
+    for (ng in nGrams){
+      temp_matrix<-Matrix_List[[ng]]
+      temp_matrix<-temp_matrix+w
+      temp_matrix<-temp_matrix[!rowSums(temp_matrix[]==0) >=1,]
+      if(is.null(dim(temp_matrix)[1])==TRUE){
+        n_gram_order_context<-forward_convolve(word_environmental[temp_matrix,])
+        order_superposition<-rbind(order_superposition,n_gram_order_context)
+      }else{
+        for(row_i in 1:dim(temp_matrix)[1]){
+          n_gram_order_context<-forward_convolve(word_environmental[temp_matrix[row_i,],])
+          order_superposition<-rbind(order_superposition,n_gram_order_context)
+        }
+      }
+    }
+    order_context_summed<-colSums(order_superposition)
+    word_mem[sentence_ids[w],]<-word_mem[sentence_ids[w],]+
+      vec_norm(w_context)+vec_norm(order_context_summed)
+  }
+}
+
+Rprof(NULL) 
+print(summaryRprof(tf))
+
+word_sim("bat","baseball",levels(Long_text$word),word_mem)
+
+```
+
+
+# Beagle model with Random Permutation Vectors
+
+```{r}
+## Define some functions
+
+vec_norm <- function(x){
+  return(x/sqrt(sum(x^2)))
+}
+
+forward_convolve <- function(input_matrix){
+  temp_matrix<-input_matrix
+  dim_mat<-dim(temp_matrix)
+  for (i in 1:(dim_mat[1]-1)){
+    temp_matrix[i+1,]<-convolve(temp_matrix[i,],temp_matrix[(i+1),])
+  }
+  return(temp_matrix[(i+1),])
+}
+
+word_sim<-function(w1,w2,TermVec,wrep){
+  w1Ind<-which(TermVec==w1)
+  w2Ind<-which(TermVec==w2)
+  return(cor(wrep[w1Ind,],wrep[w2Ind,]))
+}
+
+shifter <- function(x, n = 1) {
+if (n == 0) x else c(tail(x, -n), head(x, n))
+}
+
+
+create_random_index_vectors <- function(dim,inds,sparsity){
+  base_vector<-c(rep(0,(dim-sparsity)),rep(1,(sparsity/2)),rep(-1,(sparsity/2)))
+  temp_matrix<-matrix(0,ncol=dim,nrow=inds)
+  for(i in 1:inds){
+    temp_matrix[i,]<-sample(base_vector)
+  }
+  return(temp_matrix)
+}
+```
+
+```{r}
+#Load text to data frame
+wiki<-scan(file="wiki.txt",what=character(),sep="\n")
+
+text_df<-data_frame(line=1:998,text=wiki)
+
+#convert to long format, 1 word per row
+Long_text<-text_df %>% 
+  unnest_tokens(word,text)
+
+# add numbered ids for each unique word
+Long_text$word<-as.factor(Long_text$word)
+word_ids<-as.integer(Long_text$word)
+Long_text<-cbind(Long_text,word_ids)
+
+#levels(Long_text$word)[310]
+
+#vector dimensionality
+vdim<-2000
+num_terms<-3966
+sparse<-6
+# create random vectors for each term
+word_environmental<-create_random_index_vectors(vdim,num_terms,sparse)
+word_mem<-word_environmental
+
+Rprof (tf <- "log.log", memory.profiling=TRUE)
+
+order_window<-c(-2,-1,0,1,2)
+
+for( Sntcs in 1:900){
+  sentence_ids<-Long_text[Long_text$line==Sntcs,]$word_ids
+  sentence_matrix<-word_environmental[sentence_ids,]
+  sentence_summed_vector<-colSums(sentence_matrix)
+  num_words<-length(sentence_ids)
+  
+  for(w in 1:num_words){
+    ##Context
+    w_context<-sentence_summed_vector-sentence_matrix[w,]
+    
+    order_superposition<-sentence_matrix
+    order_superposition[w,]<-0
+    
+    store_order_vecs<-matrix(0,ncol=vdim,nrow=5)
+    cnt<-0
+    for(s in order_window){
+      if(s+w > 0 && s+w <=num_words){
+        cnt<-cnt+1
+        store_order_vecs[cnt,]<-shifter(order_superposition[(w+s),],s)
+      }
+    }
+    
+    order_context_summed<-colSums(store_order_vecs)
+    word_mem[sentence_ids[w],]<-word_mem[sentence_ids[w],]+
+      vec_norm(w_context)+vec_norm(order_context_summed)
+  }
+}
+
+Rprof(NULL) 
+print(summaryRprof(tf))
+
+word_sim("bat","baseball",levels(Long_text$word),word_mem)
+
+```
+
+# Process TASA
+
+```{r,eval=FALSE}
+TASA<-scan(file="tasaDocs.txt",what=character(),sep="\n")
+
+removeWords <- function(str, stopwords) {
+  x <- unlist(strsplit(str, " "))
+  paste(x[!x %in% stopwords], collapse = " ")
+}
+
+#removeWords(str, stopwords)
+
+for(i in 1:length(TASA)){
+  TASA[i]<-removeWords(TASA[i],"[S]")
+}
+
+x<-"\\["
+
+TASA<-TASA[!TASA %in% grep(paste0(x, collapse = "|"), TASA, value = T)]
+
+writeLines(TASA,con="testme.txt") 
+writeLines(new,con="testme2.txt")
+
+TASA<-scan(file="testme.txt",what=character(),sep="\n")
+new<-paste(TASA,sep=" ",collapse=" ")
+TASA<-paste(TASA,sep=".",collapse="\n")
+
+newTASA<-scan(file="testme2.txt",what=character())
+testNew<-strsplit(new,split=".",fixed=T)
+nearTASA<-unlist(testNew)
+noLeadingTASA<-trimws(nearTASA,which="left")
+
+library(qdapRegex)
+
+rm_white(noLeadingTASA[1:20])
+
+Clean_TASA<-rm_white(noLeadingTASA)
+writeLines(New_CLEAN_TASA,con="Clean_TASA.txt")
+
+pat<-"[[:punct:]]"
+
+No_Punct_TASA<-rm_default(Clean_TASA,pattern=pat)
+
+New_CLEAN_TASA<-No_Punct_TASA[No_Punct_TASA!=""]
+
+Final_TASA<-scan(file="Clean_TASA.txt",what=character(),sep="\n")
+
+
+```
+
+
+# BEAGLE train on TASA
+```{r}
+Final_TASA<-scan(file="Clean_TASA.txt",what=character(),sep="\n")
+
+## Define some functions
+
+vec_norm <- function(x){
+  return(x/sqrt(sum(x^2)))
+}
+
+#vec_norm<-function(x){as.numeric(sqrt(crossprod(x)))}
+
+forward_convolve <- function(input_matrix){
+  temp_matrix<-input_matrix
+  dim_mat<-dim(temp_matrix)
+  for (i in 1:(dim_mat[1]-1)){
+    temp_matrix[i+1,]<-convolve(temp_matrix[i,],temp_matrix[(i+1),])
+  }
+  return(temp_matrix[(i+1),])
+}
+
+word_sim<-function(w1,w2,TermVec,wrep){
+  w1Ind<-which(TermVec==w1)
+  w2Ind<-which(TermVec==w2)
+  return(cor(wrep[w1Ind,],wrep[w2Ind,]))
+}
+
+shifter <- function(x, n = 1) {
+#if (n == 0) x else c(tail(x, -n), head(x, n))
+  if(n==0){x} 
+  else if (n>0){
+    c(x[(1+n):3000],x[1:n])
+  } else
+    c(x[(3000+n+1):3000],x[1:(3000+n)])
+}
+
+
+create_random_index_vectors <- function(dim,inds,sparsity){
+  base_vector<-c(rep(0,(dim-sparsity)),rep(1,(sparsity/2)),rep(-1,(sparsity/2)))
+  temp_matrix<-matrix(0,ncol=dim,nrow=inds)
+  for(i in 1:inds){
+    temp_matrix[i,]<-sample(base_vector)
+  }
+  return(temp_matrix)
+}
+
+## Load libraries
+
+library(dplyr)
+library(tidytext)
+library(data.table)
+
+#Load text to data frame
+#wiki<-scan(file="wiki.txt",what=character(),sep="\n")
+
+num_sentences<-500000
+
+text_df<-data.table(line=1:num_sentences,text=Final_TASA[1:num_sentences])
+
+#convert to long format, 1 word per row
+Long_text<-text_df %>% 
+  unnest_tokens(word,text)
+
+# add numbered ids for each unique word
+Long_text$word<-as.factor(Long_text$word)
+word_ids<-as.integer(Long_text$word)
+word_names<-levels(Long_text$word)
+
+
+stop_list <- scan(file="stoplist.txt",what=character(),sep="")
+num_words<-grep(pattern = "[0-9]", word_names, value = TRUE)
+
+Long_text<-Long_text[word%in%stop_list!=T,]
+Long_text<-Long_text[word%in%num_words!=T,]
+
+#ReFactor
+
+Long_text$word<-factor(Long_text$word)
+word_ids<-as.integer(Long_text$word)
+word_names<-levels(Long_text$word)
+Long_text<-cbind(Long_text,word_ids)
+
+#vector dimensionality
+vdim<-3000
+num_terms<-length(unique(word_ids))
+sparse<-30
+# create random vectors for each term
+word_environmental<-create_random_index_vectors(vdim,num_terms,sparse)
+word_mem<-word_environmental
+
+#Rprof (tf <- "log.log", memory.profiling=TRUE)
+
+order_window<-c(-2,-1,0,1,2)
+
+for( Sntcs in 1:num_sentences){
+  if(Sntcs %% 100==0){
+    print(Sntcs)
+  }
+  sentence_ids<-Long_text[line==Sntcs,]$word_ids
+  if(length(sentence_ids) >2){
+  sentence_matrix<-word_environmental[sentence_ids,]
+  sentence_summed_vector<-colSums(sentence_matrix)
+  num_words<-length(sentence_ids)
+  
+  for(w in 1:num_words){
+    ##Context
+    w_context<-sentence_summed_vector-sentence_matrix[w,]
+    
+    order_superposition<-sentence_matrix
+    order_superposition[w,]<-0
+    
+    store_order_vecs<-matrix(0,ncol=vdim,nrow=5)
+    cnt<-0
+    for(s in order_window){
+      if(s+w > 0 && s+w <=num_words){
+        cnt<-cnt+1
+        store_order_vecs[cnt,]<-shifter(order_superposition[(w+s),],s)
+      }
+    }
+    
+    order_context_summed<-colSums(store_order_vecs)
+    
+    word_mem[sentence_ids[w],]<-word_mem[sentence_ids[w],]+vec_norm(w_context)+vec_norm(order_context_summed)
+    
+    word_mem[sentence_ids[w],]<vec_norm(word_mem[sentence_ids[w],])
+  }
+  }
+}
+
+#Rprof(NULL) 
+#print(summaryRprof(tf))
+
+#which(word_names=="king")
+
+get_similar_words<-function(in_word,memory,termlist,number){
+  library(lsa)
+  word_index<-which(termlist==in_word)
+  correlations<-cosine(memory[word_index,],t(memory))
+  names(correlations)<-termlist
+  sorted_cors<-sort(correlations,decreasing=T)
+  return(sorted_cors[1:number])
+}
+
+get_similar_words("hospital",word_mem,word_names,20)
+
+library(lsa)
+
+get_similar_words_back1<-function(in_word,memory,termlist,number){
+  library(lsa)
+  word_index<-which(termlist==in_word)
+  correlations<-cosine(shifter(memory[word_index,],-1),t(memory))
+  names(correlations)<-termlist
+  sorted_cors<-sort(correlations,decreasing=T)
+  return(sorted_cors[1:number])
+}
+
+get_similar_words_back1_env<-function(in_word,memory,env,termlist,number){
+  library(lsa)
+  word_index<-which(termlist==in_word)
+  correlations<-cosine(shifter(env[word_index,],-1),t(memory))
+  names(correlations)<-termlist
+  sorted_cors<-sort(correlations,decreasing=T)
+  return(sorted_cors[1:number])
+}
+
+get_similar_words_env<-function(in_word,memory,env,termlist,number){
+  library(lsa)
+  word_index<-which(termlist==in_word)
+  correlations<-cosine(env[word_index,],t(memory))
+  names(correlations)<-termlist
+  sorted_cors<-sort(correlations,decreasing=T)
+  return(sorted_cors[1:number])
+}
+#word_sim("first","americans",levels(Long_text$word),word_mem)
+
+```
+
+
+#SpeedTests
+```{r}
+library(data.table)
+
+num_sentences<-50000
+
+text_df<-data_frame(line=1:num_sentences,text=Final_TASA[1:num_sentences])
+
+
+#convert to long format, 1 word per row
+Long_text<-text_df %>% 
+  unnest_tokens(word,text)
+
+#ss<-Long_text_dt[line==1,]
+#ss$word_ids
+#
+
+
+# add numbered ids for each unique word
+Long_text$word<-as.factor(Long_text$word)
+word_ids<-as.integer(Long_text$word)
+word_names<-levels(Long_text$word)
+Long_text<-cbind(Long_text,word_ids)
+
+Long_text_dt<-as.data.table(Long_text)
+
+#levels(Long_text$word)[310]
+
+#vector dimensionality
+vdim<-2000
+num_terms<-length(unique(word_ids))
+sparse<-6
+# create random vectors for each term
+word_environmental<-create_random_index_vectors(vdim,num_terms,sparse)
+word_mem<-word_environmental
+
+Rprof (tf <- "log.log", memory.profiling=TRUE)
+
+order_window<-c(-2,-1,0,1,2)
+
+for( Sntcs in 1:num_sentences){
+  if(Sntcs %% 100==0){
+    print(Sntcs)
+  }
+  sentence_ids<-Long_text_dt[line==Sntcs,]$word_ids
+  #if(length(sentence_ids) >3){
+  #sentence_matrix<-word_environmental[sentence_ids,]
+  #sentence_summed_vector<-colSums(sentence_matrix)
+  #num_words<-length(sentence_ids)
+  #}
+}
+
+Rprof(NULL) 
+print(summaryRprof(tf))
+
+```
+
+# speed test shift function
+
+```{r}
+
+shifter <- function(x, n = 1) {
+#if (n == 0) x else c(tail(x, -n), head(x, n))
+  if(n==0){x} 
+  else if (n>0){
+    c(x[(1+n):2000],x[1:n])
+  } else
+    c(x[(2000+n+1):2000],x[1:(2000+n)])
+}
+
+Rprof (tf <- "log.log", memory.profiling=TRUE)
+
+vec_to_shift<-rnorm(2000,0,1)
+
+for(i in 1:100000){
+  a<-shifter(vec_to_shift,1)
+}
+
+Rprof(NULL) 
+print(summaryRprof(tf))
+
+
+```

@@ -1,0 +1,79 @@
+---
+title: "Univariate_gender"
+output:
+  html_document:
+    keep_md: yes
+---
+
+## Model gender sub-groups using weight
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(flexmix)
+library(ggplot2)
+
+gender <- read.csv(file="data/gender.csv")
+```
+
+## Plot histogram of Weight ~ Gender
+
+```{r}
+gender %>% ggplot(aes(x = Weight)) + geom_histogram(bins = 100) + theme_bw()
+```
+
+## Use mixture model to estimate parameters of two gaussian distributions from the gender data
+
+```{r}
+fit_mixture <- flexmix(Weight ~ 1,    # the means and sds are constant
+                       data = gender, # the data frame
+                       k = 2,         # the number of clusters,
+                       model = FLXMCnorm1(),      # univariate Gaussian
+                       control = list(tol = 1e-15, # tolerance for EM stop
+                                      verbose = 0, # show partial results
+                                      iter = 1e4)  # max number of iterations
+                       ) 
+
+# proportions of data assigned to each cluster
+proportions <- prior(fit_mixture)
+proportions
+
+# parameters estimated by the model
+parameters(fit_mixture)
+
+```
+
+## Visualize estimated parameters over data
+
+```{r}
+fun_prop <- function(x, mean, sd, proportion){
+  proportion * dnorm(x = x, mean = mean, sd = sd)
+}
+
+comp_1 <- parameters(fit_mixture, component = 1)
+comp_2 <- parameters(fit_mixture, component = 2)
+
+
+gender %>%
+ ggplot() + geom_histogram(aes(x = Weight, y = ..density..), binwidth = 2) +
+  stat_function(geom = "line", fun = fun_prop, args = list(mean = comp_1[1], 
+                                                           sd = comp_1[2],
+                                                           proportion = proportions[1])
+                ) +
+  stat_function(geom = "line", fun = fun_prop, args = list(mean = comp_2[1],
+                                                           sd = comp_2[2],
+                                                           proportion = proportions[2])
+                ) +
+  theme_bw()
+```
+
+
+## Create table of categorization accuracy
+
+```{r}
+
+# table of assignmentment accuracy
+table(gender$Gender, clusters(fit_mixture))
+
+```

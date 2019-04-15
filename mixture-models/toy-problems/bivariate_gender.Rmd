@@ -1,0 +1,90 @@
+---
+title: "bivariate_gender"
+output:
+  html_document:
+    keep_md: yes
+---
+
+## Model gender sub-groups using weight and BMI 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(flexmix)
+library(ggplot2)
+library(ellipse)
+
+gender <- read.csv(file="data/gender.csv")
+```
+## Plot Weight*BMI ~ Gender
+
+```{r}
+# Plot the ellipses
+gender %>% 
+  ggplot(aes(x = Weight, y = BMI)) + geom_point(aes(colour = Gender))+
+  theme_bw()
+
+```
+
+## Fit mixture model using multivariate gaussian
+
+```{r}
+set.seed(1313)
+fit_with_covariance <- flexmix(cbind(Weight , BMI) ~ 1,
+               data = gender,
+               k = 2, 
+               model = FLXMCmvnorm(diag = FALSE),
+               control = list(tolerance = 1e-15, iter.max = 1000))
+```
+
+
+## Extract parameters
+
+```{r}
+# Get the parameters
+comp_1 <- parameters(fit_with_covariance, component = 1)
+comp_2 <- parameters(fit_with_covariance, component = 2)
+
+# The means
+mean_comp_1 <- comp_1[1:2]
+mean_comp_1
+mean_comp_2 <- comp_2[1:2]
+mean_comp_2
+
+# The covariance matrices
+covariance_comp_1 <- matrix(comp_1[3:6], nrow = 2)
+covariance_comp_1
+covariance_comp_2 <- matrix(comp_2[3:6], nrow = 2)
+covariance_comp_2
+```
+
+## Plot model over data
+
+
+```{r}
+# Create ellipse curve 1
+ellipse_comp_1 <- ellipse(x = covariance_comp_1, 
+                          centre = mean_comp_1,
+                          npoints = nrow(gender))
+head(ellipse_comp_1)
+
+# Create ellipse curve 2
+ellipse_comp_2 <- ellipse(x = covariance_comp_2, 
+                          centre = mean_comp_2,
+                          npoints = nrow(gender))
+
+# Plot the ellipses
+gender %>% 
+  ggplot(aes(x = Weight, y = BMI)) + geom_point()+
+  geom_path(data = data.frame(ellipse_comp_1), aes(x=x,y=y), col = "red") +
+  geom_path(data = data.frame(ellipse_comp_2), aes(x=x,y=y), col = "blue") +
+  theme_bw()
+```
+
+
+
+## Check the assignments
+```{r}
+table(gender$Gender, clusters(fit_with_covariance))
+```

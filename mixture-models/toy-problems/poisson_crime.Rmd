@@ -1,0 +1,86 @@
+---
+title: "poisson_crime"
+output:
+  html_document:
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+library(flexmix)
+library(tidyr)
+```
+
+## Model clusters of neighborhoods by crime rates
+
+```{r}
+crimes <- read.csv("data/CoC_crimes.csv")
+crimes_matrix <- as.matrix(crimes[,-1])
+```
+
+## Fit mixture model using poisson distributions
+-  There are 15 different categories of crimes
+-  find best fitting set of clusters (1 to 12) for crime categories (each neighborhood provides an observation)
+-  Determine which neighborhoods fall within each cluster
+
+```{r}
+set.seed(11234)
+poisson_mix_model <- stepFlexmix(crimes_matrix ~ 1, 
+                                 k = 1:12, 
+                                 nrep = 20, 
+                                 model = FLXMCmvpois(),
+                                 control = list(tolerance = 1e-15, iter = 1000))
+
+```
+
+## Use BIC method to determine which model was best
+
+```{r}
+best_fit <- getModel(poisson_mix_model, which = "BIC")
+
+prior(best_fit)
+
+param_pmm <- data.frame(parameters(best_fit))
+
+param_pmm <- param_pmm %>% mutate(Type = colnames(crimes_matrix))
+
+head(param_pmm)
+```
+
+## Plot clusters by crime rates
+
+
+```{r}
+param_pmm %>% 
+  gather(Components, Lambda, -Type) %>% 
+  ggplot(aes(x = Type, y = Lambda, fill = Type)) + 
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Components) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.position = "none")
+```
+
+## Show which neighborhoods that fall within each cluster
+- Clusters 2, 3, and 5 have the highest crime rates
+- Clusters 6 and 1 have the lowest
+
+
+```{r}
+
+crimes_c <- crimes %>% 
+  mutate(CLUSTER = factor(clusters(best_fit)))
+
+crimes_c %>% 
+  group_by(CLUSTER) %>% 
+  mutate(NUMBER = row_number()) %>% 
+  ggplot(aes(x = CLUSTER, y = NUMBER, col = CLUSTER)) + 
+  geom_text(aes(label = COMMUNITY), size = 2.3)+
+  theme_bw() +
+  theme(legend.position="none") +
+  labs(x = "Clustered Neighborhoods")
+```
+

@@ -1,0 +1,206 @@
+---
+title: "gaussian mixture models"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(dplyr)
+library(mixtools)
+```
+
+## Simplified Expectation Maximization example
+
+1. estimate the probabilities (expectation)
+2. estimate the parameters (maximization)
+3. repeat
+
+```{r}
+expectation <- function(data, means, proportions, sds){
+  # Estimate the probabilities
+  exp_data <- data %>% 
+    mutate(prob_from_cluster1 = proportions[1] * dnorm(x, mean = means[1], sd = sds[1]),
+           prob_from_cluster2 = proportions[2] * dnorm(x, mean = means[2], sd = sds[2]),
+           prob_cluster1 = prob_from_cluster1/(prob_from_cluster1 + prob_from_cluster2),
+           prob_cluster2 = prob_from_cluster2/(prob_from_cluster1 + prob_from_cluster2)) %>% 
+    select(x, prob_cluster1, prob_cluster2)
+    
+  # Return data with probabilities
+  return(exp_data)
+}
+
+maximization <- function(data_with_probs){
+  means_estimates <- data_with_probs %>%
+    summarise(mean_1 = sum(x * prob_cluster1) / sum(prob_cluster1),
+              mean_2 = sum(x * prob_cluster2) / sum(prob_cluster2)) %>% 
+    as.numeric()
+  props_estimates <- data_with_probs %>% 
+    summarise(proportion_1 = mean(prob_cluster1),
+              proportion_2 = 1 - proportion_1) %>% 
+    as.numeric()
+  list(means_estimates, props_estimates)   
+}
+
+fun_gaussian <- function(x, mean, proportion){
+  proportion * dnorm(x, mean, sd = 10)
+}
+```
+
+# Create two gaussian distributions
+
+```{r}
+gaussian_sample <- data.frame(x = c(rnorm(7000, 20, 10), rnorm(3000, 50, 10)))
+
+gaussian_sample %>% 
+  ggplot() + geom_histogram(aes(x = x, y = ..density..), binwidth = 3, colour = "black", 
+                 fill = "white") +
+  theme_bw()
+```
+
+# Fit mixture model using expectation maximization function
+
+```{r}
+means_init <- c(0, 100)
+props_init <- c(0.5, 0.5)
+
+# Iterative process
+for(i in 1:100){
+  new_values <- maximization(expectation(gaussian_sample, means_init, props_init, c(10, 10)))
+  means_init <- new_values[[1]]
+  props_init <- new_values[[2]]
+  cat(c(i, means_init, props_init), "\n")
+}
+
+
+```
+
+
+# Plot estimated parameters over data
+
+```{r}
+gaussian_sample %>% 
+  ggplot() + geom_histogram(aes(x = x, y = ..density..), binwidth = 3, colour = "black", 
+                 fill = "white") +
+  stat_function(geom = "line", fun = fun_gaussian,
+                args = list(mean = means_init[1], proportion = props_init[1]),
+                colour = "red", lwd = 1.5) +
+  stat_function(geom = "line", fun = fun_gaussian,
+                args = list(mean = means_init[2], proportion = props_init[2]),
+                colour = "blue", lwd = 1.5) +
+  theme_bw()
+
+```
+
+# Gaussian mixture model example #2
+
+## Create two gaussian distributions
+
+```{r}
+# generate some data
+set.seed(1523444)
+
+# settings for data simulation:
+N_samples    <- 1000       # number of total samples
+prob1        <- 0.3        # probability of sampling from dist. 1 
+prob2        <- 1 - prob1  # probability of sampling from dist. 2
+
+sample_dist <- data.frame(
+  mean = c(100,150),
+  sd    = c(10, 20)
+)
+
+# create N_samples of prob1 and prob2
+whichD <- sample(c(1,2),N_samples, replace=TRUE, prob=c(prob1, prob2))
+
+# replace with samples from distribution
+dat <- sapply(whichD, function(x) 
+  rnorm(1,sample_dist$mean[x],sample_dist$sd[x]))
+
+glimpse(dat)
+
+```
+# Fit mixture model using expectation maximization function
+
+```{r}
+# simulation starts with some guessed parameters
+mu1    <- mean(dat,1)*0.8  # guess that dist1 has a mean smaller than the total sample average 
+mu2    <- mean(dat,1)*1.2  # guess that dist2 has a mean larger than the total sample average
+sd1    <- sd(dat)          # guess that sd = sample sd
+sd2    <- sd(dat)
+est_prop  <- 0.5           # guess the proportion of samples belonging to dist1
+old_prop  <- 0             # placeholder for previous estimation
+
+
+# function needed for the estimation maximization
+# analogous to the weighted.mean function
+weighted.sd <- function(x,w,mu = mean(x)){
+  wvar <- sum(w*(x-mu)^2)/ sum(w)
+  return(sqrt(wvar))
+}
+
+# iterate until threshold is reached
+while (abs(est_prop-old_prop)>.00001){
+  
+  old_prop <- est_prop
+  
+  # Estimate the probabilities (expectation)
+  resp <- est_prop*dnorm(dat,mu2,sd2)/
+    ((1-est_prop)*dnorm(dat,mu1,sd1) + est_prop*dnorm(dat,mu2,sd2))
+  
+  # Estimate the parameters (maximization)
+  mu1 <- weighted.mean(dat,1-resp)
+  mu2 <- weighted.mean(dat,resp)
+  
+  sd1 <- weighted.sd(dat,1-resp,mu1)
+  sd2 <- weighted.sd(dat,resp,mu2)
+  
+  est_prop <- mean(resp)
+  print(est_prop)
+  
+}
+
+df <- data.frame(rt=dat)
+```
+
+# Plot estimated parameters over data
+
+```{r}
+ggplot(df, aes(x = rt)) + 
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white", binwidth = 3) + 
+  stat_function(fun = function(k) (1-est_prop)*dnorm(k,mu1,sd1),
+                colour = "red", lwd = 1.5) +
+  stat_function(fun = function(k) est_prop*dnorm(k,mu2,sd2),
+                colour = "blue", lwd = 1.5) +
+  xlab("RT (ms)") + ylab("Density") +
+  theme_bw()
+
+# mixtools for comparison
+```
+
+# Run same as above, but with the mixtools library
+
+```{r}
+plot_mix_comps <- function(x, mu, sigma, lam) {
+  lam * dnorm(x, mu, sigma)
+}
+
+
+mixmdl <- normalmixEM( dat, mu = c(1,4),
+                     sigma=c(sd(dat),sd(dat)))
+
+
+data.frame(x = mixmdl$x) %>%
+  ggplot() +
+  geom_histogram(aes(x, ..density..), binwidth = 3, colour = "black", 
+                 fill = "white") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(mixmdl$mu[1], mixmdl$sigma[1], lam = mixmdl$lambda[1]),
+                colour = "red", lwd = 1.5) +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(mixmdl$mu[2], mixmdl$sigma[2], lam = mixmdl$lambda[2]),
+                colour = "blue", lwd = 1.5) +
+  ylab("Density") +
+  theme_bw()
+```

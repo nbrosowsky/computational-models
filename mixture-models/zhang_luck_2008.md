@@ -77,11 +77,12 @@ fit_mixture_model <- function(data, start_values) {
   
   # get final parameters
   finparm <- apply(chain[-c(1:burnin),],2,mean) 
-  print(finparm)
+  
+  #print(finparm)
   
   td <- c(-180:180)
   
-  pred <- (1-finparm[1]) * dvonmises(mkcirc(td),mkcirc(0),sd2k(finparm[2])) + finparm[1]*dunif(td,-180,180)
+  pred <- (1-finparm[1]) * dvonmises(mkcirc(td),mkcirc(0),sd2k(finparm[2])) + finparm[1]*rep(1,length(data))/(2*pi)
   
   posterior<-chain[-c(1:burnin),]
   
@@ -90,82 +91,6 @@ fit_mixture_model <- function(data, start_values) {
 ```
 
 
-## Bayesian mixture model (same as above, except only returns parameter estimates)
-
-
-```r
-fit_mm_params <- function(data, start_values) {
-  
-  # placeholder for monte-carlo markov chain values
-  chain <- matrix(0,5000,2) 
-  # put starting  values in first
-  chain[1,] <- start_values
-  
-  # number of "burn-in" values 
-  # aka. throw away the first N values
-  burnin <- 500
-
-  # proposed sd values
-  propsd <- start_values*.05
-  
-  # upper and lower bounds
-  # c(prop in memory, degree error)
-  lb <- c(0,4)
-  ub <- c(1,360)
-  
-  # number of iterations
-  N_chain <- dim(chain)[1]
-  
-  for (i in c(2:N_chain)) { 
-    cur <- chain[i-1,]
-    
-    # Run loop until proposed values fall within upper and lower bounds
-    doitagain <- TRUE
-    while (doitagain) {
-      # proposed values + random noise
-      propl <- cur + rnorm(2,0,propsd) 
-      doitagain <- any(propl<lb) || any(propl>ub)
-    }
-    
-    # The use of logarithms guards against numerical issue that arise when very small (or large) numbers are multiplied
-    # one consequence: multiplication turns into addition
-    # likelihood of proposed values
-    lpropval <- logmixturepdf(data, propl[1], propl[2]) + logprior(propl[1], propl[2])
-    
-    # likelihood of current values
-    lcurval  <- logmixturepdf(data,cur[1],cur[2]) + logprior(cur[1],cur[2])
-    
-    # likelihood ratio
-    # Likewise, the ratio of the two values for the target distribution is computed by subtraction rather than division
-    # Because that ratio must be in the range 0-1 to permit comparison against a random uniform number, 
-    # the difference operation on logarithms is exponentiated in the same line in order to return to the original untransformed space. 
-    # (The exponentiated difference between two logs is the same as the ratio between the original numbers).
-    llratio  <- exp(lpropval-lcurval)   
-    
-    # if the value for the proposal is greater than for the current sample, then the ratio of values is necessarily greater than one
-    # thus the random uniform number can never be greater than the ratio and thus the proposal will always be accepted. 
-    # When the ratio is less than 1, 
-    if (runif(1) < llratio) { 
-      chain[i,] <- propl
-    } else {
-      chain[i,] <- cur
-    }
-    
-  } 
-  
-  # get final parameters
-  finparm <- apply(chain[-c(1:burnin),],2,mean) 
-  #print(finparm)
-  
-  #td <- c(-180:180)
-  
-  #pred <- (1-finparm[1]) * dvonmises(mkcirc(td),mkcirc(0),sd2k(finparm[2])) + finparm[1]*dunif(td,-180,180)
-  
-  #posterior<-chain[-c(1:burnin),]
-  
-  return(finparm)
-} 
-```
 
 ## Load data
 
@@ -225,14 +150,7 @@ for (s in 1:length(ssz)) {
   posteriors[[s]] <- cp$posterior
   preds[[s]] <- preds[[s]]/sum(preds[[s]])  #normalize
 }
-```
 
-```
-## [1]  0.004510406 40.104121432
-## [1]  0.004567974 83.890885873
-```
-
-```r
 sub_summary$setsize<-factor(sub_summary$setsize)
 sub_summary$error_discrete<-factor(sub_summary$error_discrete)
 levels(sub_summary$error_discrete)<-seq(from=-180, to=180, by=20)
@@ -259,7 +177,7 @@ ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = error
   scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+![](zhang_luck_2008_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
 
 
 
@@ -285,14 +203,7 @@ for (s in 1:length(ssz)) {
   posteriors[[s]] <- cp$posterior
   preds[[s]] <- preds[[s]]/sum(preds[[s]])  #normalize
 }
-```
 
-```
-## [1]  0.005502931 30.674946141
-## [1]  0.004937381 76.381921566
-```
-
-```r
 sub_summary$setsize<-factor(sub_summary$setsize)
 sub_summary$error_discrete<-factor(sub_summary$error_discrete)
 levels(sub_summary$error_discrete)<-seq(from=-180, to=180, by=20)
@@ -319,7 +230,7 @@ ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = error
   scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
+![](zhang_luck_2008_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
 
 ## Fit mixture model for all subs
 
@@ -334,11 +245,12 @@ mm_data <- c()
 
 
 for (s in set_sizes) {
-  for (n in 1:8) {
+  for (n in 1:2) {
     d <- data %>% filter(subject == n, setsize == s)
-    m <- fit_mm_params(d$errors, start_values)
+    m <- fit_mixture_model(d$errors, start_values)
     
-    mm_data <- rbind(mm_data, c(n, s, m[1], m[2]))
+    mm_data <- rbind(mm_data, c(n, s, mean(m$posteriors[,1]), mean(m$posteriors[,2]) ))
+                     
   }
 }
 ```
@@ -361,7 +273,20 @@ mm_summary <- mm_data %>%
             mean_sd = mean(sd)
   )
 
+mm_summary
+```
 
+```
+## # A tibble: 4 x 3
+##   setsize prob_memory mean_sd
+##     <dbl>       <dbl>   <dbl>
+## 1       1       0.988    13.7
+## 2       2       0.870    21.9
+## 3       3       0.771    25.2
+## 4       6       0.361    29.8
+```
+
+```r
 ggplot(mm_summary, aes(x = setsize, y = prob_memory)) + 
   geom_point(size = 3.5)+
   theme_bw() +
@@ -370,7 +295,7 @@ ggplot(mm_summary, aes(x = setsize, y = prob_memory)) +
   labs(x = "Set Size", y = "Probability in Memory", title = "Zhang and Luck, 2008; Exp 2")
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
+![](zhang_luck_2008_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
 
 ```r
 ggplot(mm_summary, aes(x = setsize, y = mean_sd)) + 
@@ -381,4 +306,4 @@ ggplot(mm_summary, aes(x = setsize, y = mean_sd)) +
   labs(x = "Set Size", y = "Standard Deviation", title = "Zhang and Luck, 2008; Exp 2")
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-7-2.png)<!-- -->
+![](zhang_luck_2008_files/figure-html/unnamed-chunk-6-2.png)<!-- -->

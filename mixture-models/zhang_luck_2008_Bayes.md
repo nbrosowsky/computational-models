@@ -177,7 +177,7 @@ ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = error
   scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
+![](zhang_luck_2008_Bayes_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
 
 
 
@@ -230,7 +230,7 @@ ggplot(sub_summary[sub_summary$setsize == 6,], aes(x = error_discrete, y = error
   scale_x_continuous(breaks=seq(-180, 180, 20))  # Ticks from 0-10, every .25
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+![](zhang_luck_2008_Bayes_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
 
 ## Fit mixture model for all subs
 
@@ -280,10 +280,10 @@ mm_summary
 ## # A tibble: 4 x 3
 ##   setsize prob_memory mean_sd
 ##     <dbl>       <dbl>   <dbl>
-## 1       1       0.988    13.7
+## 1       1       0.987    13.7
 ## 2       2       0.870    21.9
-## 3       3       0.771    25.2
-## 4       6       0.361    29.8
+## 3       3       0.780    25.4
+## 4       6       0.362    29.1
 ```
 
 ```r
@@ -295,7 +295,7 @@ ggplot(mm_summary, aes(x = setsize, y = prob_memory)) +
   labs(x = "Set Size", y = "Probability in Memory", title = "Zhang and Luck, 2008; Exp 2")
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
+![](zhang_luck_2008_Bayes_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
 
 ```r
 ggplot(mm_summary, aes(x = setsize, y = mean_sd)) + 
@@ -306,4 +306,4 @@ ggplot(mm_summary, aes(x = setsize, y = mean_sd)) +
   labs(x = "Set Size", y = "Standard Deviation", title = "Zhang and Luck, 2008; Exp 2")
 ```
 
-![](zhang_luck_2008_files/figure-html/unnamed-chunk-6-2.png)<!-- -->
+![](zhang_luck_2008_Bayes_files/figure-html/unnamed-chunk-6-2.png)<!-- -->
